@@ -1,3 +1,13 @@
+x-app: &app
+  build: .
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-wind_insights}:${POSTGRES_PASSWORD:-local-dev-only}@postgres:5432/${POSTGRES_DB:-wind_insights}
+    REDIS_URL: redis://redis:6379/0
+  restart: unless-stopped
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -8,7 +18,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wind_insights} -d ${POSTGRES_DB:-wind_insights}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -23,66 +33,43 @@ services:
       retries: 10
     restart: unless-stopped
 
-  api:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    env_file: .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://wind_insights:local-dev-only@postgres:5432/wind_insights}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+  # One-shot: migrate the schema and load January 2026 data if the DB is empty.
+  migrate:
+    <<: *app
+    command: ["sh", "-c", "alembic upgrade head && python -m app.ingestion --if-empty"]
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["/bin/sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    restart: "no"
+
+  api:
+    <<: *app
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/live')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready')"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
 
   worker:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    env_file: .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://wind_insights:local-dev-only@postgres:5432/wind_insights}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-    command: ["celery", "-A", "app.tasks:celery_app", "worker", "--loglevel=INFO"]
+    <<: *app
+    command: ["celery", "-A", "app.tasks:celery_app", "worker", "--loglevel=INFO", "--concurrency=1"]
     depends_on:
-      api:
-        condition: service_healthy
-    restart: unless-stopped
+      migrate:
+        condition: service_completed_successfully
 
   beat:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    env_file: .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://wind_insights:local-dev-only@postgres:5432/wind_insights}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-    command: ["celery", "-A", "app.tasks:celery_app", "beat", "--loglevel=INFO"]
+    <<: *app
+    command: ["celery", "-A", "app.tasks:celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
     depends_on:
-      api:
-        condition: service_healthy
-    restart: unless-stopped
-
-  web:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-    ports:
-      - "8080:80"
-    depends_on:
-      api:
-        condition: service_healthy
-    restart: unless-stopped
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:

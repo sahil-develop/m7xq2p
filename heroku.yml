@@ -1,0 +1,9 @@
+# Heroku container stack: `heroku stack:set container`, then `git push heroku main`.
+build:
+  docker:
+    web: Dockerfile
+release:
+  image: web
+  # Apply migrations, then load January 2026 data on the first deploy only.
+  command:
+    - sh -c "alembic upgrade head && python -m app.ingestion --if-empty"
