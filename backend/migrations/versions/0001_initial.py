@@ -4,8 +4,8 @@ Revision ID: 0001
 Revises:
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0001"
 down_revision = None
@@ -22,9 +22,7 @@ def upgrade() -> None:
         sa.Column("generation_mw", sa.Float(), nullable=False),
         sa.UniqueConstraint("start_time", "publish_time", name="uq_forecast_start_publish"),
     )
-    op.create_index(
-        "ix_forecast_start_publish", "wind_forecasts", ["start_time", "publish_time"]
-    )
+    op.create_index("ix_forecast_start_publish", "wind_forecasts", ["start_time", "publish_time"])
     op.create_table(
         "wind_actuals",
         sa.Column("start_time", sa.DateTime(timezone=True), primary_key=True),

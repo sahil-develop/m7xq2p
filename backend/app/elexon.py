@@ -1,62 +1,60 @@
-from datetime import date, datetime, time, timedelta, timezone
+"""Thin client for the two Elexon BMRS datasets this product uses."""
+
+from datetime import UTC, date, datetime
 from typing import Any
 
 import httpx
 
 from app.config import get_settings
 
-UTC = timezone.utc
-
 
 class ElexonAPIError(RuntimeError):
-    pass
+    """Elexon returned data we cannot trust; retrying will not help."""
+
+
+def _iso_z(value: datetime) -> str:
+    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class ElexonClient:
     def __init__(self, http_client: httpx.Client | None = None) -> None:
-        self.http_client = http_client or httpx.Client(timeout=30)
-        self.base_url = get_settings().elexon_base_url.rstrip("/")
+        settings = get_settings()
+        self.http_client = http_client or httpx.Client(timeout=settings.elexon_timeout_seconds)
+        self.base_url = settings.elexon_base_url.rstrip("/")
+
+    def close(self) -> None:
+        self.http_client.close()
 
     def _get_records(self, dataset: str, params: dict[str, str]) -> list[dict[str, Any]]:
+        # raise_for_status raises httpx.HTTPStatusError, which the Celery task retries.
         response = self.http_client.get(f"{self.base_url}/datasets/{dataset}/stream", params=params)
         response.raise_for_status()
         payload = response.json()
-        if not isinstance(payload, list):
-            raise ElexonAPIError(f"Elexon {dataset} response was not a JSON array")
-        if any(not isinstance(row, dict) for row in payload):
-            raise ElexonAPIError(f"Elexon {dataset} response contained an invalid record")
+        if not isinstance(payload, list) or any(not isinstance(row, dict) for row in payload):
+            raise ElexonAPIError(f"Elexon {dataset} response was not a JSON array of records")
         return payload
 
-    def fetch_actuals(self, day: date) -> list[dict[str, Any]]:
+    def fetch_actuals(self, first_day: date, last_day: date) -> list[dict[str, Any]]:
+        """FUELHH WIND outturn for settlement dates first_day..last_day inclusive."""
         rows = self._get_records(
             "FUELHH",
             {
-                "settlementDateFrom": day.isoformat(),
-                "settlementDateTo": day.isoformat(),
+                "settlementDateFrom": first_day.isoformat(),
+                "settlementDateTo": last_day.isoformat(),
                 "fuelType": "WIND",
             },
         )
-        return [
-            row
-            for row in rows
-            if row.get("fuelType") == "WIND" and row.get("settlementDate") == day.isoformat()
-        ]
+        return [row for row in rows if row.get("fuelType") == "WIND"]
 
-    def fetch_forecasts(self, publish_day: date) -> list[dict[str, Any]]:
-        day_start = datetime.combine(publish_day, time.min, tzinfo=UTC)
-        day_end = day_start + timedelta(days=1) - timedelta(seconds=1)
-        rows = self._get_records(
+    def fetch_forecasts(self, published_from: datetime, published_to: datetime) -> list[dict]:
+        """WINDFOR forecasts published in [published_from, published_to]."""
+        return self._get_records(
             "WINDFOR",
             {
-                "publishDateTimeFrom": day_start.isoformat().replace("+00:00", "Z"),
-                "publishDateTimeTo": day_end.isoformat().replace("+00:00", "Z"),
+                "publishDateTimeFrom": _iso_z(published_from),
+                "publishDateTimeTo": _iso_z(published_to),
             },
         )
-        return [
-            row
-            for row in rows
-            if _parse_datetime(row.get("publishTime")).date() == publish_day
-        ]
 
 
 def _parse_datetime(value: Any) -> datetime:

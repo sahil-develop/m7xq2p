@@ -1,56 +1,57 @@
+import os
 from collections.abc import Generator
 
 import pytest
+from factories import MemoryRedis
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.cache import get_redis
 from app.database import Base, get_db
 from app.main import app
 
-
-class MemoryRedis:
-    def __init__(self) -> None:
-        self.values: dict[str, str] = {}
-
-    def get(self, key: str) -> str | None:
-        return self.values.get(key)
-
-    def setex(self, key: str, _ttl: int, value: str) -> None:
-        self.values[key] = value
-
-    def delete(self, key: str) -> None:
-        self.values.pop(key, None)
-
-    def ping(self) -> bool:
-        return True
+# Set TEST_DATABASE_URL (e.g. in CI) to run the suite against real Postgres.
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
 
 @pytest.fixture
-def db_session() -> Generator[Session, None, None]:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+def engine():
+    if TEST_DATABASE_URL:
+        engine = create_engine(TEST_DATABASE_URL)
+    else:
+        engine = create_engine(
+            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+        )
+    Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
-    with factory() as session:
-        yield session
+    yield engine
     Base.metadata.drop_all(engine)
     engine.dispose()
 
 
 @pytest.fixture
-def client(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]:
-    from app.cache import get_redis
+def session_factory(engine) -> sessionmaker:
+    return sessionmaker(bind=engine, expire_on_commit=False)
 
-    memory_redis = MemoryRedis()
-    monkeypatch.setattr("app.main.get_redis", lambda: memory_redis)
 
+@pytest.fixture
+def db_session(session_factory) -> Generator[Session, None, None]:
+    with session_factory() as session:
+        yield session
+
+
+@pytest.fixture
+def memory_redis() -> MemoryRedis:
+    return MemoryRedis()
+
+
+@pytest.fixture
+def client(session_factory, memory_redis) -> Generator[TestClient, None, None]:
     def override_db():
-        yield db_session
+        with session_factory() as session:
+            yield session
 
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_redis] = lambda: memory_redis
