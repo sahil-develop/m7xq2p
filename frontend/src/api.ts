@@ -4,6 +4,9 @@ import type { Dashboard } from "./types";
 // VITE_API_BASE_URL to the API origin when the SPA is hosted separately (Vercel).
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
 
+// Swagger UI served by the backend, e.g. https://m7xq2p.onrender.com/docs on Vercel.
+export const API_DOCS_URL = `${API_BASE}/docs`;
+
 export async function fetchDashboard(cutoff: string, signal?: AbortSignal): Promise<Dashboard> {
   let response: Response;
   try {

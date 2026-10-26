@@ -114,6 +114,7 @@ correctly.
 | `backend/app/analytics.py` | Forecast selection at the cutoff, hourly pairing, accuracy metrics and breakdowns |
 | `backend/app/period.py` | The January 2026 decision and delivery window, cutoff and timezone helpers |
 | `backend/app/ingestion.py` | Elexon → Postgres sync (CLI: `python -m app.ingestion [--if-empty]`) |
+| `backend/app/startup.py` | Migrate and seed an empty database on API startup (`INIT_DB_ON_STARTUP`, default on) |
 | `backend/app/elexon.py` | HTTP client and record validation for WINDFOR and FUELHH |
 | `backend/app/cache.py` | Redis read-through cache with graceful degradation |
 | `backend/app/tasks.py` | Celery app, nightly schedule, retry policy |
@@ -224,9 +225,10 @@ Render. The Docker Compose stack and the single-image build are unaffected.
 - `CORS_ORIGINS`: the Vercel origin(s), comma-separated, no trailing slash, e.g.
   `https://<project>.vercel.app`.
 - Optional: `REDIS_URL` (Render Key Value) for caching and manual sync, `INGESTION_TOKEN`.
-- Pre-Deploy Command: `alembic upgrade head && python -m app.ingestion --if-empty`.
-  On instance types without pre-deploy, set the Docker Command to
-  `sh -c "alembic upgrade head && python -m app.ingestion --if-empty && uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers"`.
+- No Pre-Deploy Command or custom Docker Command is needed. On startup, before serving
+  requests, the API applies migrations and loads January 2026 from Elexon if the database
+  is empty (`backend/app/startup.py`); restarts skip both. A migration failure stops the
+  deploy; an Elexon failure is logged and the API starts without data until the next sync.
 - Health Check Path: `/api/v1/health/ready`
 
 **Vercel**

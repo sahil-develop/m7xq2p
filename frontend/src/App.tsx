@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchDashboard } from "./api";
+import { API_DOCS_URL, fetchDashboard } from "./api";
 import { BiasByHourChart, DailyMaeChart, HorizonChart } from "./components/BarCharts";
 import { DailyTable } from "./components/DailyTable";
 import { ForecastChart } from "./components/ForecastChart";
@@ -257,7 +257,11 @@ export default function App() {
         <footer className="footer">
           Error = forecast − actual, so positive means the forecast was too high. Actual is the
           mean of the two half-hourly FUELHH WIND values in each hour, to match hourly WINDFOR
-          forecasts. API docs at <a href="/docs">/docs</a>.
+          forecasts. API docs at{" "}
+          <a href={API_DOCS_URL} target="_blank" rel="noreferrer">
+            {API_DOCS_URL}
+          </a>
+          .
         </footer>
       )}
     </div>
