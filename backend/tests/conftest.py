@@ -1,4 +1,8 @@
 import os
+
+# Tests build their own schema; never migrate or call Elexon from the app lifespan.
+os.environ["INIT_DB_ON_STARTUP"] = "false"
+
 from collections.abc import Generator
 
 import pytest

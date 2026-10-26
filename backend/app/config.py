@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     # NoDecode: read CORS_ORIGINS as a comma-separated string, not JSON.
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     ingestion_token: str | None = None
+    # Migrate and seed an empty database when the API starts (see app.startup).
+    init_db_on_startup: bool = True
     # Directory holding the built React app; served by FastAPI when present.
     static_dir: str = "/app/static"
 

@@ -1,4 +1,6 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date, time
 from hmac import compare_digest
 from pathlib import Path
@@ -19,11 +21,24 @@ from app.config import get_settings
 from app.database import get_db
 from app.period import DECISION_END, DECISION_START, DEFAULT_DECISION_CUTOFF
 from app.schemas import DashboardResponse, HealthResponse, IngestionAccepted
+from app.startup import initialise_database
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Runs before uvicorn accepts connections, so no request sees a missing table.
+    if get_settings().init_db_on_startup:
+        initialise_database()
+    else:
+        logger.info("Startup: INIT_DB_ON_STARTUP is off; skipping migrations and import")
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="UK Wind Forecast Insights",
     description=(
         "Day-ahead wind forecasts available to GB power buyers for January 2026 purchase "
