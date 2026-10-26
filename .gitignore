@@ -1,14 +1,41 @@
+# Local-only notes (demo video script)
+YT.md
+
+# Secrets and local environment
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
 .venv/
+venv/
+env/
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .coverage
+coverage.xml
 htmlcov/
+celerybeat-schedule*
+
+# Node / frontend
 node_modules/
 dist/
-.DS_Store
-.venv/
-*.docx
+build/
+coverage/
 *.tsbuildinfo
+.vite/
+.vercel/
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+*.log
+
+# Challenge brief
+*.docx

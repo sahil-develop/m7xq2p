@@ -148,3 +148,41 @@ def test_filter_by_decision_date_recomputes_metrics(db_session):
     assert [p.decision_date for p in day.points] == [date(2026, 1, 1)]
     assert [row.decision_date for row in day.daily] == [date(2026, 1, 1)]
     assert [group.label for group in day.by_hour_of_day] == ["10:00"]
+
+
+def test_empty_database_returns_a_full_month_with_no_metrics(db_session):
+    result = build_dashboard(db_session, NINE)
+
+    assert result.points == []
+    assert result.summary.paired_intervals == 0
+    assert result.summary.mae_mw is None
+    assert result.last_synced_at is None
+    assert len(result.daily) == 31
+    assert all(row.forecast_hours == 0 and row.mae_mw is None for row in result.daily)
+    assert result.by_hour_of_day == [] and result.by_horizon == []
+
+
+def test_zero_actual_hours_are_scored_but_excluded_from_mape():
+    metrics = compute_metrics([_point(100, actual=0), _point(-100, actual=1000)])
+
+    assert metrics.paired_intervals == 2
+    assert metrics.mae_mw == 100
+    assert metrics.mape_percent == pytest.approx(10)  # only the non-zero hour
+    assert metrics.nmae_percent == pytest.approx(20)  # 100 / mean actual of 500
+
+
+def test_mape_and_nmae_are_unavailable_when_all_actuals_are_zero():
+    metrics = compute_metrics([_point(50, actual=0)])
+
+    assert metrics.mae_mw == 50
+    assert metrics.mape_percent is None
+    assert metrics.nmae_percent is None
+
+
+def test_decision_cutoff_is_uk_local_time_across_daylight_saving():
+    from app.period import cutoff_for, decision_date_for
+
+    assert cutoff_for(date(2026, 1, 15), NINE) == utc(2026, 1, 15, 9)  # GMT
+    assert cutoff_for(date(2026, 7, 15), NINE) == utc(2026, 7, 15, 8)  # BST
+    # 23:30 UTC on 1 July is already 2 July in London, so its decision day is 1 July.
+    assert decision_date_for(utc(2026, 7, 1, 23, 30)) == date(2026, 7, 1)

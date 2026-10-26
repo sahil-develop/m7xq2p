@@ -13,9 +13,12 @@ export function DailyTable({
   return (
     <div className="table-scroll">
       <table>
+        <caption className="visually-hidden">
+          Forecast accuracy per decision day. Select a decision day to show it in the charts.
+        </caption>
         <thead>
           <tr>
-            <th scope="col">Decision day</th>
+            <th scope="col" className="sticky-col">Decision day</th>
             <th scope="col">Delivery day</th>
             <th scope="col">Forecast used (published)</th>
             <th scope="col" className="num">Forecast energy</th>
@@ -31,11 +34,16 @@ export function DailyTable({
               key={row.decision_date}
               className={row.decision_date === selected ? "selected" : undefined}
             >
-              <td>
-                <button type="button" className="link" onClick={() => onSelect(row.decision_date)}>
+              <th scope="row" className="sticky-col">
+                <button
+                  type="button"
+                  className="link"
+                  aria-pressed={row.decision_date === selected}
+                  onClick={() => onSelect(row.decision_date)}
+                >
                   {formatIsoDate(row.decision_date)}
                 </button>
-              </td>
+              </th>
               <td>{formatIsoDate(row.delivery_date)}</td>
               <td>{row.latest_publish_time ? formatDateTime(row.latest_publish_time) : "–"}</td>
               <td className="num">{(row.forecast_energy_mwh / 1000).toFixed(0)} GWh</td>

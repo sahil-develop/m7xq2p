@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { formatIsoDate, formatSigned, toChartRows } from "./lib";
-import type { AccuracyMetrics, IntervalPoint } from "./types";
+import { biasHint, formatIsoDate, formatSigned, resolveView, toChartRows } from "./lib";
+import type { AccuracyMetrics, DailyAccuracy, Dashboard, IntervalPoint } from "./types";
 
 const metrics: AccuracyMetrics = {
   paired_intervals: 10,
@@ -52,5 +52,63 @@ describe("formatters", () => {
 
   it("keeps calendar dates on the same London day", () => {
     expect(formatIsoDate("2026-01-31")).toBe("Sat 31 Jan");
+  });
+});
+
+const dayRow = (decision: string, delivery: string, mae: number): DailyAccuracy => ({
+  ...metrics,
+  mae_mw: mae,
+  decision_date: decision,
+  delivery_date: delivery,
+  forecast_hours: 1,
+  forecast_energy_mwh: 1000,
+  latest_publish_time: `${decision}T07:30:00Z`,
+});
+
+const dashboard: Dashboard = {
+  period_start: "2026-01-01",
+  period_end: "2026-01-31",
+  decision_cutoff_local: "09:00",
+  summary: metrics,
+  last_synced_at: null,
+  points: [point(10000), { ...point(4000), decision_date: "2026-01-02", start_time: "2026-01-03T10:00:00Z" }],
+  daily: [dayRow("2026-01-01", "2026-01-02", 111), dayRow("2026-01-02", "2026-01-03", 222)],
+  by_hour_of_day: [],
+  by_horizon: [],
+};
+
+describe("resolveView", () => {
+  it("shows the whole month when no day is selected", () => {
+    const view = resolveView(dashboard, null);
+    expect(view.day).toBeUndefined();
+    expect(view.metrics).toBe(dashboard.summary);
+    expect(view.rows).toHaveLength(2);
+  });
+
+  it("filters points and metrics to the selected decision day", () => {
+    const view = resolveView(dashboard, "2026-01-02");
+    expect(view.day?.delivery_date).toBe("2026-01-03");
+    expect(view.metrics.mae_mw).toBe(222);
+    expect(view.points.map((p) => p.forecast_mw)).toEqual([4000]);
+  });
+
+  it("keeps the month-wide error band for a single day", () => {
+    const [row] = resolveView(dashboard, "2026-01-02").rows;
+    expect(row.band).toEqual([2500, 4500]);
+  });
+
+  it("falls back to the month for a day outside the window", () => {
+    const view = resolveView(dashboard, "2026-02-14");
+    expect(view.day).toBeUndefined();
+    expect(view.points).toHaveLength(2);
+  });
+});
+
+describe("biasHint", () => {
+  it("describes the sign of the bias, including exactly zero", () => {
+    expect(biasHint(5)).toBe("Forecast above actual on average");
+    expect(biasHint(-5)).toBe("Forecast below actual on average");
+    expect(biasHint(0)).toBe("No average bias");
+    expect(biasHint(null)).toBe("No paired hours");
   });
 });

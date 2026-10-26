@@ -7,7 +7,7 @@ from app.ingestion import sync_january_data
 
 _redis_url = get_settings().redis_url or "redis://localhost:6379/0"
 
-celery_app = Celery("wind_insights", broker=_redis_url, backend=_redis_url)
+celery_app = Celery("wind_forecast_insights", broker=_redis_url, backend=_redis_url)
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],

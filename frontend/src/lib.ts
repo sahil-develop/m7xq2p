@@ -1,4 +1,4 @@
-import type { AccuracyMetrics, IntervalPoint } from "./types";
+import type { AccuracyMetrics, DailyAccuracy, Dashboard, IntervalPoint } from "./types";
 
 export const LONDON = "Europe/London";
 
@@ -71,3 +71,26 @@ export const formatDateTime = (value: string | number) => dateTime.format(new Da
 export const formatDay = (value: string | number) => dayOnly.format(new Date(value));
 /** ISO calendar dates (YYYY-MM-DD) are read as midday UTC so the London date never shifts. */
 export const formatIsoDate = (iso: string) => weekdayDay.format(new Date(`${iso}T12:00:00Z`));
+
+export interface DashboardView {
+  /** The selected decision day, or undefined for the whole month (also when `selected` is unknown). */
+  day: DailyAccuracy | undefined;
+  metrics: AccuracyMetrics;
+  points: IntervalPoint[];
+  rows: ChartRow[];
+}
+
+/** Client-side day filter over the month-wide payload; no extra request is needed. */
+export function resolveView(data: Dashboard, selected: string | null): DashboardView {
+  const day = selected ? data.daily.find((row) => row.decision_date === selected) : undefined;
+  const points = day ? data.points.filter((p) => p.decision_date === day.decision_date) : data.points;
+  // The likely-range band always uses the month's error distribution: one day is too few hours.
+  return { day, metrics: day ?? data.summary, points, rows: toChartRows(points, data.summary) };
+}
+
+export function biasHint(meanErrorMw: number | null): string {
+  if (meanErrorMw === null) return "No paired hours";
+  if (meanErrorMw > 0) return "Forecast above actual on average";
+  if (meanErrorMw < 0) return "Forecast below actual on average";
+  return "No average bias";
+}

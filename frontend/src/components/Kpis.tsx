@@ -1,4 +1,4 @@
-import { formatGw, formatPercent, formatSigned } from "../lib";
+import { biasHint, formatGw, formatPercent, formatSigned } from "../lib";
 import type { AccuracyMetrics } from "../types";
 
 interface Tile {
@@ -7,7 +7,7 @@ interface Tile {
   hint: string;
 }
 
-export function Kpis({ metrics }: { metrics: AccuracyMetrics }) {
+export function Kpis({ metrics, scope }: { metrics: AccuracyMetrics; scope: "month" | "day" }) {
   const tiles: Tile[] = [
     {
       label: "Mean absolute error",
@@ -17,12 +17,7 @@ export function Kpis({ metrics }: { metrics: AccuracyMetrics }) {
     {
       label: "Bias",
       value: formatSigned(metrics.mean_error_mw),
-      hint:
-        metrics.mean_error_mw === null
-          ? "No paired hours"
-          : metrics.mean_error_mw > 0
-            ? "Forecast above actual on average"
-            : "Forecast below actual on average",
+      hint: biasHint(metrics.mean_error_mw),
     },
     {
       label: "RMSE",
@@ -40,15 +35,19 @@ export function Kpis({ metrics }: { metrics: AccuracyMetrics }) {
       hint: `${metrics.paired_intervals.toLocaleString("en-GB")} hours compared`,
     },
   ];
+  const title = scope === "day" ? "Accuracy for the selected day" : "Accuracy across January";
   return (
-    <section className="kpis" aria-label="Forecast accuracy summary">
-      {tiles.map((tile) => (
-        <div className="kpi card" key={tile.label}>
-          <div className="kpi-label">{tile.label}</div>
-          <div className="kpi-value">{tile.value}</div>
-          <div className="kpi-hint">{tile.hint}</div>
-        </div>
-      ))}
+    <section className="kpis-section" aria-label={title}>
+      <h2 className="section-label">{title}</h2>
+      <div className="kpis">
+        {tiles.map((tile) => (
+          <div className="kpi card" key={tile.label}>
+            <div className="kpi-label">{tile.label}</div>
+            <div className="kpi-value">{tile.value}</div>
+            <div className="kpi-hint">{tile.hint}</div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

@@ -24,8 +24,10 @@ Using the default 09:00 UK decision cutoff, across 744 delivery hours (2 Jan –
 What this means for the desk:
 - The forecast is systematically optimistic. Buying against the raw forecast would
   usually leave the desk short of wind and buying back at higher prices.
-- The likely-range band in the app makes the error usable at decision time. For
-  example: "plan for wind 0.5 GW above to 4.1 GW below the forecast".
+- The likely-range band in the app turns the error into a planning range. For
+  example: "plan for wind 0.5 GW above to 4.1 GW below the forecast". It is computed
+  from January itself, so treat it as a description of this month's error rather than
+  a validated prediction for other months.
 - Deciding later barely helps. A 13:00 cutoff (after the midday run) cuts MAE only to
   1.90 GW, and the bias stays at +1.69 GW.
 
@@ -43,10 +45,11 @@ generation.
 | Hourly vs half-hourly | WINDFOR is hourly; FUELHH is half-hourly. Each forecast hour is compared with the **mean of its two half-hours**, and hours missing either half are not scored. | Like-for-like average MW over the hour |
 | Error | `forecast − actual`; positive means over-forecast | |
 | Metrics | MAE, RMSE, bias, MAPE, nMAE (MAE / mean actual), P10/P50/P90 of signed error, P90 of absolute error | Bias and quantiles matter more than MAPE for procurement sizing |
-| Likely range | `[forecast − P90 error, forecast − P10 error]` using the month's error distribution | Empirical, distribution-free 80% interval |
+| Likely range | `[forecast − P90 error, forecast − P10 error]` using the month's error distribution | Empirical, distribution-free 80% interval. It is measured on January itself (in-sample), so it describes this month's error; the UI says so. |
 
 WINDFOR publishes 8 runs a day (02:30, 04:30, 07:30, 09:30, 11:30, 15:30, 18:30 and
-22:30 UTC), each covering about 48 hours ahead. In January, UK local time equals UTC.
+22:30 UTC). Each run covers hourly targets from a few hours before publication up to
+21:00 UTC two days later (about 46–66 hours ahead), so the 07:30 run on D covers all of D+1. In January, UK local time equals UTC.
 The code still converts through `Europe/London`, so other months would handle BST
 correctly.
 
@@ -98,7 +101,10 @@ correctly.
   - One fetch per cutoff returns the whole month (744 points). Picking a day filters
     client-side, so it is instant.
   - The view state (`?cutoff=09:00&day=2026-01-10`) is kept in the URL so it can be
-    shared.
+    shared. A day outside the window falls back to the whole month.
+  - While a new cutoff loads, the previous view stays visible (dimmed) with a loading
+    notice. If a request fails, the last good view stays on screen with an error and a
+    Retry button. An empty database shows instructions instead of empty charts.
 
 ## Repository layout
 
@@ -118,10 +124,12 @@ correctly.
 | `frontend/src/components/` | KPI tiles, forecast chart, bar charts, daily table |
 | `frontend/src/lib.ts` (+ `lib.test.ts`) | Likely-range computation and formatters (Vitest) |
 | `Dockerfile` | Multi-stage build: React → static files inside the Python API image |
+| `backend/Dockerfile` | API-only image built from `backend/` (Render; SPA hosted separately) |
 | `compose.yaml` | Postgres, Redis, one-shot migrate+seed, API, Celery worker and beat |
 | `heroku.yml` | Heroku container deploy with release-phase migration and seed |
 | `.github/workflows/ci.yml` | Lint, format, migration round-trip, tests on Postgres, frontend tests and build, Docker build |
 | `.env.example` | Configuration template (no secrets) |
+| `AUDIT.md` | Requirement-by-requirement audit with verification evidence |
 
 ## Running it
 
@@ -145,7 +153,7 @@ You need Python 3.11+, Node 20+, and a reachable PostgreSQL. Redis is optional.
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements-dev.txt
 cd backend
-export DATABASE_URL=postgresql+psycopg://USER:PASS@localhost:5432/wind_insights
+export DATABASE_URL=postgresql+psycopg://USER:PASS@localhost:5432/wind_forecast_insights
 export REDIS_URL=redis://localhost:6379/0     # optional
 alembic upgrade head
 python -m app.ingestion                       # load Elexon data
@@ -173,7 +181,12 @@ The suite covers:
 - ingestion idempotency, rollback on bad data, and deduplication;
 - Elexon client validation;
 - request validation, health endpoints, manual-sync authentication, Celery retry
-  wiring, and SPA hosting.
+  wiring, and SPA hosting;
+- empty-database responses, zero-output hours in MAPE/nMAE, and UK-local cutoffs
+  across daylight saving;
+- `rediss://` (Heroku Redis) URL handling for redis-py and Celery;
+- frontend: likely-range maths, client-side day filtering, invalid shared links, and
+  formatters.
 
 ## Deployment (Heroku)
 
@@ -191,9 +204,36 @@ git push heroku main
 
 - The release phase runs migrations and loads the data on the first deploy.
 - `DATABASE_URL` from Heroku (`postgres://…`) is normalised automatically.
+- `REDIS_URL` from Heroku Redis (`rediss://…`, self-signed certificate) gets
+  `ssl_cert_reqs=none` appended unless the URL already sets it, as Heroku documents.
+  Without it Celery refuses the URL and redis-py fails certificate verification.
 - To enable nightly refreshes, add a worker dyno process running
   `celery -A app.tasks:celery_app worker -B --concurrency=1`. Without it, the app works
   on the data loaded at release.
+
+## Deployment (Vercel frontend + Render backend)
+
+The same repository can also deploy as two services: the SPA on Vercel and the API on
+Render. The Docker Compose stack and the single-image build are unaffected.
+
+**Render (web service, Docker runtime)**
+
+- Root Directory: `backend` (uses `backend/Dockerfile`; build context is `backend/`)
+- Create a Render Postgres instance and set `DATABASE_URL` to its internal URL
+  (`postgresql://…` is normalised automatically).
+- `CORS_ORIGINS`: the Vercel origin(s), comma-separated, no trailing slash, e.g.
+  `https://<project>.vercel.app`.
+- Optional: `REDIS_URL` (Render Key Value) for caching and manual sync, `INGESTION_TOKEN`.
+- Pre-Deploy Command: `alembic upgrade head && python -m app.ingestion --if-empty`.
+  On instance types without pre-deploy, set the Docker Command to
+  `sh -c "alembic upgrade head && python -m app.ingestion --if-empty && uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers"`.
+- Health Check Path: `/api/v1/health/ready`
+
+**Vercel**
+
+- Root Directory: `frontend`; framework preset Vite (build `npm run build`, output `dist`).
+- `VITE_API_BASE_URL`: the Render service origin, e.g. `https://<service>.onrender.com`.
+  It is read at build time, so redeploy after changing it.
 
 ## API
 
@@ -210,5 +250,6 @@ Full schema: `/docs` (Swagger UI) or `/openapi.json`.
 
 This project was built with help from AI coding assistants, including Anthropic's
 Claude (Claude Code). They were used to review and fix the initial backend, write the
-frontend and tests, and draft this README. All analysis figures above come from running
+frontend and tests, and draft this README. A later AI-assisted audit pass (Claude Code)
+checked every requirement against the brief and fixed the defects listed in `AUDIT.md`. All analysis figures above come from running
 the code against live Elexon data.

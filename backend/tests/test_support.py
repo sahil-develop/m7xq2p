@@ -1,6 +1,7 @@
 """Config, cache-failure, Celery and static-hosting behaviour."""
 
 import importlib
+import ssl
 from datetime import time
 
 import httpx
@@ -25,11 +26,40 @@ def test_hosted_postgres_urls_use_psycopg_driver(url):
     assert Settings(database_url=url).database_url == "postgresql+psycopg://u:p@host:5432/db"
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("rediss://:p@host:6379", "rediss://:p@host:6379?ssl_cert_reqs=none"),
+        ("rediss://:p@host:6379/0?a=1", "rediss://:p@host:6379/0?a=1&ssl_cert_reqs=none"),
+        ("rediss://h:6379?ssl_cert_reqs=required", "rediss://h:6379?ssl_cert_reqs=required"),
+        ("redis://localhost:6379/0", "redis://localhost:6379/0"),
+        ("", ""),
+    ],
+)
+def test_tls_redis_urls_get_heroku_compatible_cert_setting(url, expected):
+    assert Settings(redis_url=url).redis_url == expected
+
+
+def test_tls_redis_url_is_accepted_by_redis_and_celery_clients():
+    from celery import Celery
+    from redis import Redis
+
+    url = Settings(redis_url="rediss://:p@example.invalid:6379").redis_url
+    Redis.from_url(url)  # parses without connecting
+    backend = Celery("probe", broker=url, backend=url).backend  # ValueError if ssl_cert_reqs bad
+    assert backend.connparams["ssl_cert_reqs"] == ssl.CERT_NONE
+
+
 def test_cors_origins_accept_comma_separated_env_value():
     assert Settings(cors_origins="https://a.example, https://b.example").cors_origins == [
         "https://a.example",
         "https://b.example",
     ]
+
+
+def test_cors_origins_env_var_is_not_parsed_as_json(monkeypatch):
+    monkeypatch.setenv("CORS_ORIGINS", "https://a.example,https://b.example")
+    assert Settings().cors_origins == ["https://a.example", "https://b.example"]
 
 
 def test_cache_helpers_are_noops_without_redis():
